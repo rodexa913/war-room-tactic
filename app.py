@@ -126,7 +126,7 @@ def generar_briefing_global(termino, lista_notas, gemini_k):
 
 def analizar_nota_con_ia(titular, medio, gemini_k):
     prompt = f"""Eres un analista político y periodista de gabinete experto en el estado de Veracruz. 
-A partir del siguiente encabezado o mención pública detectada en redes y medios de la fuente '{medio}':
+A partir del siguiente encabezado o mención pública reciente de la fuente '{medio}':
 
 "{titular}"
 
@@ -151,7 +151,7 @@ VOCERIA: [Directriz institucional o N/A]"""
             resumen = resp_llm.strip()
 
     if not resumen or len(resumen) < 40:
-        resumen = f"El reporte público detectado en torno a {titular} moviliza la atención de los usuarios y actores sociales en la demarcación. Este tipo de discusiones configuran la percepción ciudadana y marcan la pauta en la conversación digital regional."
+        resumen = f"El reporte reciente detectado en torno a {titular} moviliza la atención de los usuarios y actores sociales en la demarcación. Este tipo de discusiones configuran la percepción ciudadana y marcan la pauta en la conversación digital regional."
 
     return resumen.replace("(", "").replace(")", ""), (postura.replace("(", "").replace(")", "") if postura and postura.upper() != "N/A" else "")
 
@@ -214,7 +214,7 @@ with st.sidebar:
         gemini_key_in = st.text_input("Gemini API Key:", value=GEMINI_KEY_DEFAULT, type="password")
 
     btn_ejecutar_web = st.button("⚡ ESCANEAR PRENSA DIGITAL", use_container_width=True)
-    btn_ejecutar_fb = st.button("📡 RASTREAR REDES (GRATIS)", use_container_width=True)
+    btn_ejecutar_fb = st.button("📡 RASTREAR OPINIÓN Y REDES (FRESCO)", use_container_width=True)
 
 hora_actual = datetime.now(ZoneInfo("America/Mexico_City")).strftime("%H:%M:%S hrs")
 notas_todas = st.session_state.get("notas_web", []) + st.session_state.get("notas_fb", [])
@@ -289,22 +289,25 @@ if btn_ejecutar_web:
         st.warning("No se hallaron notas con esos filtros.")
 
 if btn_ejecutar_fb:
-    q_social = f"site:facebook.com {f_nombre} {f_lugar} Veracruz".strip()
+    # Consulta robusta filtrada estrictamente por las últimas 24/48 horas sobre opinión y redes en Veracruz
+    termino_social = f"{f_nombre} {f_lugar}".strip() if f_nombre else f"{f_lugar} Veracruz"
+    q_social = f'("{termino_social}" OR opinión OR redes OR debate) (Veracruz OR Córdoba) when:2d'
     lista_social = []
-    with st.spinner("Rastreando menciones públicas en redes sociales (Gratis)..."):
+    with st.spinner("Rastreando columnas y pulso de redes recientes..."):
         feed_soc = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q_social)}&hl=es-419&gl=MX&ceid=MX:es-419")
-        for nota in feed_soc.entries[:5]:
+        for nota in feed_soc.entries[:6]:
             tit = nota.title
+            medio_nombre = nota.source.title if hasattr(nota, "source") else "Opinión / Redes"
             tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
-            lista_social.append({"Titular": tit, "Medio": "Facebook / Redes", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
+            lista_social.append({"Titular": tit, "Medio": f"Opinión Digital: {medio_nombre}", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
 
     if lista_social:
         progreso_soc = st.progress(0)
         lista_soc_procesada = []
         for idx, item in enumerate(lista_social, 1):
-            progreso_soc.progress(idx / len(lista_social), text=f"Analizando mención social {idx}...")
+            progreso_soc.progress(idx / len(lista_social), text=f"Analizando debate digital {idx}...")
             url_real = decodificar_url_google(item["Enlace"])
-            resumen, postura = analizar_nota_con_ia(item["Titular"], "Redes Sociales", gemini_key_in)
+            resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in)
             item["No"] = idx
             item["EnlaceReal"] = url_real
             item["Resumen"] = resumen
@@ -313,12 +316,12 @@ if btn_ejecutar_fb:
             time.sleep(1.0)
         progreso_soc.empty()
         st.session_state["notas_fb"] = lista_soc_procesada
-        st.success("¡Rastreo de redes sociales completado!")
+        st.success("¡Rastreo de opinión y redes sociales recientes completado!")
         st.rerun()
     else:
-        st.warning("No se hallaron menciones públicas recientes en redes con ese objetivo.")
+        st.warning("No se hallaron menciones recientes con ese filtro. Amplía la ventana de tiempo o cambia el objetivo.")
 
-tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Redes Sociales", "📑 Despacho de Informes"])
+tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Opinión y Redes", "📑 Despacho de Informes"])
 
 with tab_mando:
     if not df_total.empty:
