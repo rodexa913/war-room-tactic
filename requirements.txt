@@ -1,0 +1,12 @@
+streamlit
+feedparser
+pandas
+plotly
+reportlab
+beautifulsoup4
+requests
+Pillow
+apify-client
+googlenewsdecoder
+trafilatura
+playwright
