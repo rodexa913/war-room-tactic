@@ -22,21 +22,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 st.set_page_config(page_title="WAR ROOM | Centro Táctico", page_icon="🛡️", layout="wide")
 
-APIFY_TOKEN = "apify_api_L2VBXbG02tsj321P90afZ56yjXNBbX3STkme"
 GEMINI_KEY_DEFAULT = "AQ.Ab8RN6IuER73mlESZCyQUHz8A8f5Ze7gwrSR1S8YZHdEGPFi6g"
 URL_LOGO = "https://lh3.googleusercontent.com/d/1Q7A8-14SevxaLSmrzsDZDQDArpQKkvhh"
-
-FANPAGES_OBJETIVO = [
-    "https://www.facebook.com/StaffInformativo",
-    "https://www.facebook.com/profile.php?id=61593537788960",
-    "https://www.facebook.com/profile.php?id=100079191534747",
-    "https://www.facebook.com/elinformantedever",
-    "https://www.facebook.com/reporteroenlinea",
-    "https://www.facebook.com/LaNigua",
-    "https://www.facebook.com/profile.php?id=100043352720943",
-    "https://www.facebook.com/profile.php?id=61572508502099",
-    "https://www.facebook.com/periodistasmultimedios"
-]
 
 @st.cache_data(show_spinner=False)
 def descargar_logo(url):
@@ -91,7 +78,7 @@ def decodificar_url_google(url_google):
     except: pass
     return url_google
 
-def consultar_llm_dual(prompt_texto, gemini_key, groq_key):
+def consultar_llm_dual(prompt_texto, gemini_key):
     if gemini_key:
         modelos = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
         for mod in modelos:
@@ -130,30 +117,30 @@ def evaluar_tono_y_crisis(texto_completo):
     elif s_fav > s_crit: return "Favorable", "#10B981", False, 2
     return "Neutro", "#94A3B8", False, 4
 
-def generar_briefing_global(termino, lista_notas, gemini_k, groq_k):
+def generar_briefing_global(termino, lista_notas, gemini_k):
     if not lista_notas: return "Panorama Informativo: Monitoreo estratégico procesado."
     corpus = "\n".join([f"- [{n['Tono']}] {n['Titular']} ({n['Medio']})" for n in lista_notas[:8]])
-    prompt = f"Objetivo: '{termino}'. Basado en estos titulares:\n{corpus}\n\nRedacta un Memo de Situación ejecutivo en un párrafo fluido de 4 líneas que resuma el pulso político y social actual. PROHIBIDO USAR PARÉNTESIS."
-    resultado = consultar_llm_dual(prompt, gemini_k, groq_k)
+    prompt = f"Objetivo: '{termino}'. Basado en estos reportes:\n{corpus}\n\nRedacta un Memo de Situación ejecutivo en un párrafo fluido de 4 líneas que resuma el pulso político y social actual. PROHIBIDO USAR PARÉNTESIS."
+    resultado = consultar_llm_dual(prompt, gemini_k)
     return resultado.replace("(", "").replace(")", "") if resultado else "Cobertura distribuida sin incidencias críticas en la demarcación."
 
-def analizar_nota_con_ia(titular, medio, gemini_k, groq_k):
+def analizar_nota_con_ia(titular, medio, gemini_k):
     prompt = f"""Eres un analista político y periodista de gabinete experto en el estado de Veracruz. 
-A partir del siguiente titular periodístico verificado de la fuente '{medio}':
+A partir del siguiente encabezado o mención pública detectada en redes y medios de la fuente '{medio}':
 
 "{titular}"
 
 REGLAS ESTRICTAS DE REDACCIÓN:
-1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica con claridad meridiana qué trasfondo tiene este suceso, qué actores o fuerzas políticas intervienen y qué implicaciones o lectura política deja para la región de Veracruz.
+1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica con claridad meridiana qué trasfondo tiene este suceso, qué actores o fuerzas políticas intervienen y qué implicaciones o lectura política deja para la región.
 2. NO USES PARÉNTESIS en ninguna parte de tu redacción.
 3. PROHIBIDO usar lenguaje burocrático o frases vacías como "se da cuenta de", "en relación con" o "cobertura informativa señala". Ve directo al fondo del asunto con rigor analítico.
-4. Si la nota involucra crisis, conflicto o seguridad, define una directriz institucional de vocería clara. Si es favorable o neutral, pon N/A.
+4. Si involucra crisis, conflicto o seguridad, define una directriz institucional de vocería clara. Si es favorable o neutral, pon N/A.
 
 Formato exacto de respuesta:
 RESUMEN: [Párrafo analítico robusto y completo de 4 a 5 líneas, CERO paréntesis, CERO relleno]
 VOCERIA: [Directriz institucional o N/A]"""
 
-    resp_llm = consultar_llm_dual(prompt, gemini_k, groq_k)
+    resp_llm = consultar_llm_dual(prompt, gemini_k)
     resumen, postura = "", ""
     if resp_llm:
         if "RESUMEN:" in resp_llm.upper():
@@ -164,25 +151,9 @@ VOCERIA: [Directriz institucional o N/A]"""
             resumen = resp_llm.strip()
 
     if not resumen or len(resumen) < 40:
-        resumen = f"El suceso reportado bajo el encabezado {titular} refleja la dinámica actual en la esfera pública veracruzana. Este tipo de acontecimientos movilizan la atención de los actores políticos y sociales, marcando la pauta en la agenda informativa y el análisis estratégico regional."
+        resumen = f"El reporte público detectado en torno a {titular} moviliza la atención de los usuarios y actores sociales en la demarcación. Este tipo de discusiones configuran la percepción ciudadana y marcan la pauta en la conversación digital regional."
 
     return resumen.replace("(", "").replace(")", ""), (postura.replace("(", "").replace(")", "") if postura and postura.upper() != "N/A" else "")
-
-def extraer_facebook_sin_limite(termino, solo_coincidencias=False):
-    from apify_client import ApifyClient
-    resultados_fb = []
-    try:
-        client = ApifyClient(APIFY_TOKEN)
-        run = client.actor("apify/facebook-posts-scraper").call(run_input={"startUrls": [{"url": u} for u in FANPAGES_OBJETIVO], "resultsLimit": 3})
-        for post in client.dataset(run["defaultDatasetId"]).iterate_items():
-            texto = post.get("text", "") or post.get("postText", "")
-            if not texto: continue
-            if solo_coincidencias and termino.lower().strip() not in texto.lower(): continue
-            titular = texto[:95].rsplit(' ', 1)[0] + "..." if len(texto) > 95 else texto
-            tono, color, es_crisis, severidad = evaluar_tono_y_crisis(texto)
-            resultados_fb.append({"Titular": titular, "Medio": f"FB: {post.get('pageName', 'Fanpage')}", "Enlace": post.get("url", ""), "EnlaceReal": post.get("url", ""), "Tono": tono, "Color": color, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(texto), "TextoCuerpo": texto})
-    except: pass
-    return resultados_fb
 
 def generar_pdf(termino, periodo, lista_notas, briefing, logo_data):
     buffer = io.BytesIO()
@@ -241,10 +212,9 @@ with st.sidebar:
     
     with st.expander("Claves API"):
         gemini_key_in = st.text_input("Gemini API Key:", value=GEMINI_KEY_DEFAULT, type="password")
-        groq_key_in = st.text_input("Groq API Key:", type="password")
 
     btn_ejecutar_web = st.button("⚡ ESCANEAR PRENSA DIGITAL", use_container_width=True)
-    btn_ejecutar_fb = st.button("📡 RASTREAR REDES (FB)", use_container_width=True)
+    btn_ejecutar_fb = st.button("📡 RASTREAR REDES (GRATIS)", use_container_width=True)
 
 hora_actual = datetime.now(ZoneInfo("America/Mexico_City")).strftime("%H:%M:%S hrs")
 notas_todas = st.session_state.get("notas_web", []) + st.session_state.get("notas_fb", [])
@@ -302,35 +272,53 @@ if btn_ejecutar_web:
         for idx, item in enumerate(lista_previa, 1):
             progreso.progress(idx / len(lista_previa), text=f"Analizando nota estratégica {idx} de {len(lista_previa)}...")
             url_real = decodificar_url_google(item["Enlace"])
-            
-            resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in, groq_key_in)
+            resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in)
             item["No"] = idx
             item["EnlaceReal"] = url_real
             item["Resumen"] = resumen
             item["PosturaTactico"] = postura
             lista_procesada.append(item)
-            time.sleep(1.0)  # Pausa elegante para cuidar la tasa de llamadas a Gemini
+            time.sleep(1.0)
             
         progreso.empty()
         st.session_state["notas_web"] = lista_procesada
-        st.session_state["briefing_memo"] = generar_briefing_global(objetivo_res, lista_procesada, gemini_key_in, groq_key_in)
-        st.success("¡Barrido y análisis estratégico completado!")
+        st.session_state["briefing_memo"] = generar_briefing_global(objetivo_res, lista_procesada, gemini_key_in)
+        st.success("¡Barrido de prensa completado!")
         st.rerun()
     else:
         st.warning("No se hallaron notas con esos filtros.")
 
 if btn_ejecutar_fb:
-    with st.spinner("Descargando redes sociales..."):
-        posts = extraer_facebook_sin_limite(objetivo_res, False)
-        if posts:
-            for i, p in enumerate(posts, 1):
-                p["No"] = i
-                p["Resumen"], p["PosturaTactico"] = analizar_nota_con_ia(p["Titular"], p["Medio"], gemini_key_in, groq_key_in)
-                time.sleep(1.0)
-            st.session_state["notas_fb"] = posts
-            st.rerun()
+    q_social = f"site:facebook.com {f_nombre} {f_lugar} Veracruz".strip()
+    lista_social = []
+    with st.spinner("Rastreando menciones públicas en redes sociales (Gratis)..."):
+        feed_soc = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q_social)}&hl=es-419&gl=MX&ceid=MX:es-419")
+        for nota in feed_soc.entries[:5]:
+            tit = nota.title
+            tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
+            lista_social.append({"Titular": tit, "Medio": "Facebook / Redes", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
 
-tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Facebook", "📑 Despacho de Informes"])
+    if lista_social:
+        progreso_soc = st.progress(0)
+        lista_soc_procesada = []
+        for idx, item in enumerate(lista_social, 1):
+            progreso_soc.progress(idx / len(lista_social), text=f"Analizando mención social {idx}...")
+            url_real = decodificar_url_google(item["Enlace"])
+            resumen, postura = analizar_nota_con_ia(item["Titular"], "Redes Sociales", gemini_key_in)
+            item["No"] = idx
+            item["EnlaceReal"] = url_real
+            item["Resumen"] = resumen
+            item["PosturaTactico"] = postura
+            lista_soc_procesada.append(item)
+            time.sleep(1.0)
+        progreso_soc.empty()
+        st.session_state["notas_fb"] = lista_soc_procesada
+        st.success("¡Rastreo de redes sociales completado!")
+        st.rerun()
+    else:
+        st.warning("No se hallaron menciones públicas recientes en redes con ese objetivo.")
+
+tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Redes Sociales", "📑 Despacho de Informes"])
 
 with tab_mando:
     if not df_total.empty:
@@ -370,12 +358,12 @@ with tab_fb:
         <div class="intel-card">
             <div><span class="badge-tag {tag_cls}">● {item['Tono'].upper()}</span><span class="badge-tag tag-sector">{item['Sector'].upper()}</span></div>
             <h3>{item['No']}. {item['Titular']}</h3>
-            <div class="fuente-txt">Página: <b>{item['Medio']}</b></div>
+            <div class="fuente-txt">Canal: <b>{item['Medio']}</b></div>
             <div class="sintesis-txt"><b>Síntesis Analítica:</b> {item['Resumen']}</div>
             {f'<div class="tactical-box"><b>🛡️ Directriz Táctica:</b><br>{item["PosturaTactico"]}</div>' if item.get("PosturaTactico") else ''}
         </div>
         """, unsafe_allow_html=True)
-        st.link_button("Abrir Fuente Original ↗", item["EnlaceReal"])
+        st.link_button("Abrir Publicación Original ↗", item["EnlaceReal"])
 
 with tab_despacho:
     st.subheader("Consola de Despacho Operativo")
