@@ -9,4 +9,3 @@ Pillow
 apify-client
 googlenewsdecoder
 trafilatura
-playwright
