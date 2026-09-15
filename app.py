@@ -214,7 +214,7 @@ with st.sidebar:
         gemini_key_in = st.text_input("Gemini API Key:", value=GEMINI_KEY_DEFAULT, type="password")
 
     btn_ejecutar_web = st.button("⚡ ESCANEAR PRENSA DIGITAL", use_container_width=True)
-    btn_ejecutar_fb = st.button("📡 RASTREAR OPINIÓN Y REDES (FRESCO)", use_container_width=True)
+    btn_ejecutar_fb = st.button("📡 RASTREAR OPINIÓN Y REDES (ESTRICTO)", use_container_width=True)
 
 hora_actual = datetime.now(ZoneInfo("America/Mexico_City")).strftime("%H:%M:%S hrs")
 notas_todas = st.session_state.get("notas_web", []) + st.session_state.get("notas_fb", [])
@@ -289,23 +289,24 @@ if btn_ejecutar_web:
         st.warning("No se hallaron notas con esos filtros.")
 
 if btn_ejecutar_fb:
-    # Consulta robusta filtrada estrictamente por las últimas 24/48 horas sobre opinión y redes en Veracruz
-    termino_social = f"{f_nombre} {f_lugar}".strip() if f_nombre else f"{f_lugar} Veracruz"
-    q_social = f'("{termino_social}" OR opinión OR redes OR debate) (Veracruz OR Córdoba) when:2d'
+    # Búsqueda estricta obligatoria para el nombre y el municipio (sin desviarse)
+    termino_social = f'"{f_nombre.strip()}"' if f_nombre.strip() else f'"{f_lugar}"'
+    q_social = f'{termino_social} (Veracruz OR Córdoba) when:2d'
+    
     lista_social = []
-    with st.spinner("Rastreando columnas y pulso de redes recientes..."):
+    with st.spinner("Rastreando menciones estrictas recientes..."):
         feed_soc = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q_social)}&hl=es-419&gl=MX&ceid=MX:es-419")
         for nota in feed_soc.entries[:6]:
             tit = nota.title
             medio_nombre = nota.source.title if hasattr(nota, "source") else "Opinión / Redes"
             tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
-            lista_social.append({"Titular": tit, "Medio": f"Opinión Digital: {medio_nombre}", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
+            lista_social.append({"Titular": tit, "Medio": f"Mención: {medio_nombre}", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
 
     if lista_social:
         progreso_soc = st.progress(0)
         lista_soc_procesada = []
         for idx, item in enumerate(lista_social, 1):
-            progreso_soc.progress(idx / len(lista_social), text=f"Analizando debate digital {idx}...")
+            progreso_soc.progress(idx / len(lista_social), text=f"Analizando mención digital {idx}...")
             url_real = decodificar_url_google(item["Enlace"])
             resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in)
             item["No"] = idx
@@ -316,10 +317,10 @@ if btn_ejecutar_fb:
             time.sleep(1.0)
         progreso_soc.empty()
         st.session_state["notas_fb"] = lista_soc_procesada
-        st.success("¡Rastreo de opinión y redes sociales recientes completado!")
+        st.success("¡Rastreo estricto completado!")
         st.rerun()
     else:
-        st.warning("No se hallaron menciones recientes con ese filtro. Amplía la ventana de tiempo o cambia el objetivo.")
+        st.warning("No se hallaron menciones recientes exactas con ese nombre en las últimas 48 horas.")
 
 tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Opinión y Redes", "📑 Despacho de Informes"])
 
