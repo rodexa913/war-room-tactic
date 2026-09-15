@@ -14,7 +14,6 @@ import json
 import re
 from bs4 import BeautifulSoup
 from googlenewsdecoder import gnewsdecoder
-import trafilatura
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -84,10 +83,6 @@ if "notas_web" not in st.session_state: st.session_state["notas_web"] = []
 if "notas_fb" not in st.session_state: st.session_state["notas_fb"] = []
 if "briefing_memo" not in st.session_state: st.session_state["briefing_memo"] = ""
 
-def limpiar_html(texto_html):
-    if not texto_html: return ""
-    return re.sub(r'<[^>]+>', '', texto_html).strip()
-
 def decodificar_url_google(url_google):
     if "news.google.com" not in url_google: return url_google
     try:
@@ -96,41 +91,13 @@ def decodificar_url_google(url_google):
     except: pass
     return url_google
 
-def extraer_cuerpo_universal(url_directa):
-    if not url_directa or "news.google.com" in url_directa: return ""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"}
-    
-    try:
-        resp = requests.get(url_directa, headers=headers, timeout=6)
-        if resp.status_code == 200:
-            texto = trafilatura.extract(resp.text, include_comments=False)
-            if texto and len(texto) > 100: return " ".join(texto.split("\n")[:35])
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            for s in soup.find_all('script', type='application/ld+json'):
-                if s.string:
-                    try:
-                        data = json.loads(s.string)
-                        data = data[0] if isinstance(data, list) else data
-                        if "articleBody" in data and len(data["articleBody"]) > 80: return data["articleBody"][:2000]
-                    except: continue
-    except: pass
-
-    try:
-        resp_jina = requests.get(f"https://r.jina.ai/{url_directa}", timeout=8)
-        if resp_jina.status_code == 200 and len(resp_jina.text) > 100:
-            lineas = [l for l in resp_jina.text.split("\n") if len(l.strip()) > 35 and not l.startswith("http")]
-            return " ".join(lineas[:20])
-    except: pass
-    
-    return ""
-
 def consultar_llm_dual(prompt_texto, gemini_key, groq_key):
     if gemini_key:
         modelos = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
         for mod in modelos:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{mod}:generateContent?key={gemini_key}"
-                resp = requests.post(url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": [{"text": prompt_texto}]}], "generationConfig": {"temperature": 0.2}}, timeout=12)
+                resp = requests.post(url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": [{"text": prompt_texto}]}], "generationConfig": {"temperature": 0.3}}, timeout=12)
                 if resp.status_code == 200:
                     txt = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
                     if txt: return txt
@@ -165,27 +132,21 @@ def evaluar_tono_y_crisis(texto_completo):
 
 def generar_briefing_global(termino, lista_notas, gemini_k, groq_k):
     if not lista_notas: return "Panorama Informativo: Monitoreo estratégico procesado."
-    corpus = "\n".join([f"- [{n['Tono']}] {n['Titular']} ({n['Medio']}): {n['Resumen'][:120]}" for n in lista_notas[:8]])
-    prompt = f"Objetivo: '{termino}'. Analiza estas notas:\n{corpus}\n\nRedacta un Memo de Situación ejecutivo en un párrafo fluido y profesional de 4 líneas que resuma la agenda pública actual. PROHIBIDO USAR PARÉNTESIS."
+    corpus = "\n".join([f"- [{n['Tono']}] {n['Titular']} ({n['Medio']})" for n in lista_notas[:8]])
+    prompt = f"Objetivo: '{termino}'. Basado en estos titulares:\n{corpus}\n\nRedacta un Memo de Situación ejecutivo en un párrafo fluido de 4 líneas que resuma el pulso político y social actual. PROHIBIDO USAR PARÉNTESIS."
     resultado = consultar_llm_dual(prompt, gemini_k, groq_k)
-    return resultado.replace("(", "").replace(")", "") if resultado else "Cobertura distribuida sin incidencias críticas."
+    return resultado.replace("(", "").replace(")", "") if resultado else "Cobertura distribuida sin incidencias críticas en la demarcación."
 
-def analizar_nota_con_ia(titular, texto_cuerpo, snippet, es_critica, gemini_k, groq_k):
-    resumen, postura = "", ""
-    
-    if texto_cuerpo and len(texto_cuerpo) > 80:
-        material = f"Cuerpo del reportaje periodístico:\n\"\"\"{texto_cuerpo[:3500]}\"\"\""
-    else:
-        material = f"Titular oficial verificado: '{titular}'. Contexto adicional del buscador: '{snippet}'."
+def analizar_nota_con_ia(titular, medio, gemini_k, groq_k):
+    prompt = f"""Eres un analista político y periodista de gabinete experto en el estado de Veracruz. 
+A partir del siguiente titular periodístico verificado de la fuente '{medio}':
 
-    prompt = f"""Eres un analista político y periodista de gabinete experto en el estado de Veracruz. A partir de los siguientes datos, redacta un resumen periodístico robusto, profundo y analítico:
-
-{material}
+"{titular}"
 
 REGLAS ESTRICTAS DE REDACCIÓN:
-1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica con claridad meridiana qué sucedió, qué actores políticos o dependencias están implicados, en qué municipio o zona ocurrió y qué implicaciones tiene para la agenda pública regional.
+1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica con claridad meridiana qué trasfondo tiene este suceso, qué actores o fuerzas políticas intervienen y qué implicaciones o lectura política deja para la región de Veracruz.
 2. NO USES PARÉNTESIS en ninguna parte de tu redacción.
-3. PROHIBIDO usar lenguaje burocrático o frases huecas como "se da cuenta de los acontecimientos", "en relación con" o "cobertura informativa señala". Ve directo al fondo del asunto con rigor periodístico.
+3. PROHIBIDO usar lenguaje burocrático o frases vacías como "se da cuenta de", "en relación con" o "cobertura informativa señala". Ve directo al fondo del asunto con rigor analítico.
 4. Si la nota involucra crisis, conflicto o seguridad, define una directriz institucional de vocería clara. Si es favorable o neutral, pon N/A.
 
 Formato exacto de respuesta:
@@ -193,6 +154,7 @@ RESUMEN: [Párrafo analítico robusto y completo de 4 a 5 líneas, CERO parénte
 VOCERIA: [Directriz institucional o N/A]"""
 
     resp_llm = consultar_llm_dual(prompt, gemini_k, groq_k)
+    resumen, postura = "", ""
     if resp_llm:
         if "RESUMEN:" in resp_llm.upper():
             partes = resp_llm.split("VOCERIA:") if "VOCERIA:" in resp_llm else resp_llm.split("Voceria:")
@@ -201,15 +163,10 @@ VOCERIA: [Directriz institucional o N/A]"""
         else:
             resumen = resp_llm.strip()
 
-    if not resumen or len(resumen) < 50 or "se da cuenta de" in resumen.lower():
-        resumen = f"Derivado de los acontecimientos recientes en torno a {titular}, la cobertura regional documenta la atención prestada por los diversos sectores sociales y políticos. El caso genera un debate abierto en las demarcaciones veracruzanas sobre las repercusiones operativas y las medidas de seguimiento institucional necesarias en la zona."
+    if not resumen or len(resumen) < 40:
+        resumen = f"El suceso reportado bajo el encabezado {titular} refleja la dinámica actual en la esfera pública veracruzana. Este tipo de acontecimientos movilizan la atención de los actores políticos y sociales, marcando la pauta en la agenda informativa y el análisis estratégico regional."
 
     return resumen.replace("(", "").replace(")", ""), (postura.replace("(", "").replace(")", "") if postura and postura.upper() != "N/A" else "")
-
-def es_fecha_reciente(fecha_str, max_dias=7):
-    if not fecha_str or fecha_str == "Reciente": return True
-    try: return (datetime.now(timezone.utc) - parsedate_to_datetime(fecha_str)) <= timedelta(days=max_dias)
-    except: return True
 
 def extraer_facebook_sin_limite(termino, solo_coincidencias=False):
     from apify_client import ApifyClient
@@ -223,7 +180,7 @@ def extraer_facebook_sin_limite(termino, solo_coincidencias=False):
             if solo_coincidencias and termino.lower().strip() not in texto.lower(): continue
             titular = texto[:95].rsplit(' ', 1)[0] + "..." if len(texto) > 95 else texto
             tono, color, es_crisis, severidad = evaluar_tono_y_crisis(texto)
-            resultados_fb.append({"Titular": titular, "Medio": f"FB: {post.get('pageName', 'Fanpage')}", "Fecha": post.get("time", "Reciente"), "Enlace": post.get("url", ""), "EnlaceReal": post.get("url", ""), "Tono": tono, "Color": color, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(texto), "TextoCuerpo": texto})
+            resultados_fb.append({"Titular": titular, "Medio": f"FB: {post.get('pageName', 'Fanpage')}", "Enlace": post.get("url", ""), "EnlaceReal": post.get("url", ""), "Tono": tono, "Color": color, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(texto), "TextoCuerpo": texto})
     except: pass
     return resultados_fb
 
@@ -253,7 +210,7 @@ def generar_pdf(termino, periodo, lista_notas, briefing, logo_data):
         story.append(Paragraph(f"{item['No']}. [{item['Sector'].upper()}] {item['Titular']}{tag_crisis}", style_item_t))
         story.append(Paragraph(f"Fuente: <b>{item['Medio']}</b> &nbsp;|&nbsp; Postura: <b>{item['Tono']}</b>", style_item_m))
         story.append(Spacer(1, 1))
-        story.append(Paragraph(f"<b>Resumen:</b> {item['Resumen']}", style_item_r))
+        story.append(Paragraph(f"<b>Resumen Analítico:</b> {item['Resumen']}", style_item_r))
         if item.get("PosturaTactico"):
             story.append(Spacer(1, 1))
             story.append(Paragraph(f"<b>Directriz de Vocería:</b> {item['PosturaTactico']}", style_item_p))
@@ -335,26 +292,24 @@ if btn_ejecutar_web:
         feed = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=es-419&gl=MX&ceid=MX:es-419")
         for nota in feed.entries[:limite_web]:
             tit = nota.title
+            medio_nombre = nota.source.title if hasattr(nota, "source") else "Web"
             tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
-            resumen_raw = nota.summary if hasattr(nota, 'summary') else (nota.description if hasattr(nota, 'description') else "")
-            snippet = limpiar_html(resumen_raw)
-            lista_previa.append({"Titular": tit, "Medio": nota.source.title if hasattr(nota, "source") else "Web", "Fecha": nota.published if hasattr(nota, "published") else "Reciente", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit), "Snippet": snippet})
+            lista_previa.append({"Titular": tit, "Medio": medio_nombre, "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
 
     if lista_previa:
         progreso = st.progress(0)
         lista_procesada = []
         for idx, item in enumerate(lista_previa, 1):
-            progreso.progress(idx / len(lista_previa), text=f"Procesando análisis de nota {idx} de {len(lista_previa)}...")
+            progreso.progress(idx / len(lista_previa), text=f"Analizando nota estratégica {idx} de {len(lista_previa)}...")
             url_real = decodificar_url_google(item["Enlace"])
-            cuerpo = extraer_cuerpo_universal(url_real)
             
-            resumen, postura = analizar_nota_con_ia(item["Titular"], cuerpo, item.get("Snippet", ""), item["EsCrisis"], gemini_key_in, groq_key_in)
+            resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in, groq_key_in)
             item["No"] = idx
             item["EnlaceReal"] = url_real
             item["Resumen"] = resumen
             item["PosturaTactico"] = postura
             lista_procesada.append(item)
-            time.sleep(1.2)  # Pausa táctica para evitar saturar la API de Gemini
+            time.sleep(1.0)  # Pausa elegante para cuidar la tasa de llamadas a Gemini
             
         progreso.empty()
         st.session_state["notas_web"] = lista_procesada
@@ -370,8 +325,8 @@ if btn_ejecutar_fb:
         if posts:
             for i, p in enumerate(posts, 1):
                 p["No"] = i
-                p["Resumen"], p["PosturaTactico"] = analizar_nota_con_ia(p["Titular"], p.get("TextoCuerpo", ""), "", p["EsCrisis"], gemini_key_in, groq_key_in)
-                time.sleep(1.2)
+                p["Resumen"], p["PosturaTactico"] = analizar_nota_con_ia(p["Titular"], p["Medio"], gemini_key_in, groq_key_in)
+                time.sleep(1.0)
             st.session_state["notas_fb"] = posts
             st.rerun()
 
