@@ -126,18 +126,18 @@ def generar_briefing_global(termino, lista_notas, gemini_k):
 
 def analizar_nota_con_ia(titular, medio, gemini_k):
     prompt = f"""Eres un analista político y periodista de gabinete experto en el estado de Veracruz. 
-A partir del siguiente encabezado o mención pública reciente de la fuente '{medio}':
+A partir del siguiente encabezado, publicación o mención detectada de la fuente '{medio}':
 
 "{titular}"
 
 REGLAS ESTRICTAS DE REDACCIÓN:
-1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica con claridad meridiana qué trasfondo tiene este suceso, qué actores o fuerzas políticas intervienen y qué implicaciones o lectura política deja para la región.
+1. DESARROLLA UN TEXTO SÓLIDO de 4 a 5 líneas bien estructuradas. Explica a fondo qué implicaciones tiene este contenido específico, qué actores intervienen y qué lectura política o social deja.
 2. NO USES PARÉNTESIS en ninguna parte de tu redacción.
-3. PROHIBIDO usar lenguaje burocrático o frases vacías como "se da cuenta de", "en relación con" o "cobertura informativa señala". Ve directo al fondo del asunto con rigor analítico.
+3. PROHIBIDO usar frases huecas o de relleno como "el reporte reciente detectado en torno a... moviliza la atención". Analiza directamente el contenido del titular.
 4. Si involucra crisis, conflicto o seguridad, define una directriz institucional de vocería clara. Si es favorable o neutral, pon N/A.
 
 Formato exacto de respuesta:
-RESUMEN: [Párrafo analítico robusto y completo de 4 a 5 líneas, CERO paréntesis, CERO relleno]
+RESUMEN: [Párrafo analítico profundo y específico de 4 a 5 líneas sobre este tema exacto, CERO frases repetitivas, CERO paréntesis]
 VOCERIA: [Directriz institucional o N/A]"""
 
     resp_llm = consultar_llm_dual(prompt, gemini_k)
@@ -150,8 +150,8 @@ VOCERIA: [Directriz institucional o N/A]"""
         else:
             resumen = resp_llm.strip()
 
-    if not resumen or len(resumen) < 40:
-        resumen = f"El reporte reciente detectado en torno a {titular} moviliza la atención de los usuarios y actores sociales en la demarcación. Este tipo de discusiones configuran la percepción ciudadana y marcan la pauta en la conversación digital regional."
+    if not resumen or len(resumen) < 40 or "moviliza la atención" in resumen.lower():
+        resumen = f"El contenido publicado bajo el título {titular} aborda una temática relevante para la vida pública. Su análisis permite identificar las posturas de los actores involucrados y su repercusión directa en la opinión ciudadana de la zona."
 
     return resumen.replace("(", "").replace(")", ""), (postura.replace("(", "").replace(")", "") if postura and postura.upper() != "N/A" else "")
 
@@ -214,7 +214,7 @@ with st.sidebar:
         gemini_key_in = st.text_input("Gemini API Key:", value=GEMINI_KEY_DEFAULT, type="password")
 
     btn_ejecutar_web = st.button("⚡ ESCANEAR PRENSA DIGITAL", use_container_width=True)
-    btn_ejecutar_fb = st.button("📡 RASTREAR OPINIÓN Y REDES (ESTRICTO)", use_container_width=True)
+    btn_ejecutar_fb = st.button("📡 RASTREAR PERFILES Y REDES (FACEBOOK)", use_container_width=True)
 
 hora_actual = datetime.now(ZoneInfo("America/Mexico_City")).strftime("%H:%M:%S hrs")
 notas_todas = st.session_state.get("notas_web", []) + st.session_state.get("notas_fb", [])
@@ -289,26 +289,25 @@ if btn_ejecutar_web:
         st.warning("No se hallaron notas con esos filtros.")
 
 if btn_ejecutar_fb:
-    # Búsqueda estricta obligatoria para el nombre y el municipio (sin desviarse)
-    termino_social = f'"{f_nombre.strip()}"' if f_nombre.strip() else f'"{f_lugar}"'
-    q_social = f'{termino_social} (Veracruz OR Córdoba) when:2d'
+    # Búsqueda exclusiva enfocada a publicaciones directas de Facebook
+    termino_fb = f'"{f_nombre.strip()}"' if f_nombre.strip() else f'"{f_lugar}"'
+    q_social = f'site:facebook.com {termino_fb} Veracruz when:2d'
     
     lista_social = []
-    with st.spinner("Rastreando menciones estrictas recientes..."):
+    with st.spinner("Rastreando publicaciones en perfiles y páginas de Facebook..."):
         feed_soc = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q_social)}&hl=es-419&gl=MX&ceid=MX:es-419")
         for nota in feed_soc.entries[:6]:
             tit = nota.title
-            medio_nombre = nota.source.title if hasattr(nota, "source") else "Opinión / Redes"
             tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
-            lista_social.append({"Titular": tit, "Medio": f"Mención: {medio_nombre}", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
+            lista_social.append({"Titular": tit, "Medio": "Facebook / Perfil Público", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
 
     if lista_social:
         progreso_soc = st.progress(0)
         lista_soc_procesada = []
         for idx, item in enumerate(lista_social, 1):
-            progreso_soc.progress(idx / len(lista_social), text=f"Analizando mención digital {idx}...")
+            progreso_soc.progress(idx / len(lista_social), text=f"Analizando publicación social {idx}...")
             url_real = decodificar_url_google(item["Enlace"])
-            resumen, postura = analizar_nota_con_ia(item["Titular"], item["Medio"], gemini_key_in)
+            resumen, postura = analizar_nota_con_ia(item["Titular"], "Facebook", gemini_key_in)
             item["No"] = idx
             item["EnlaceReal"] = url_real
             item["Resumen"] = resumen
@@ -317,12 +316,12 @@ if btn_ejecutar_fb:
             time.sleep(1.0)
         progreso_soc.empty()
         st.session_state["notas_fb"] = lista_soc_procesada
-        st.success("¡Rastreo estricto completado!")
+        st.success("¡Rastreo de Facebook completado!")
         st.rerun()
     else:
-        st.warning("No se hallaron menciones recientes exactas con ese nombre en las últimas 48 horas.")
+        st.warning("No se hallaron publicaciones públicas recientes en Facebook con ese objetivo en las últimas 48 horas.")
 
-tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Opinión y Redes", "📑 Despacho de Informes"])
+tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Perfiles Facebook", "📑 Despacho de Informes"])
 
 with tab_mando:
     if not df_total.empty:
@@ -367,7 +366,7 @@ with tab_fb:
             {f'<div class="tactical-box"><b>🛡️ Directriz Táctica:</b><br>{item["PosturaTactico"]}</div>' if item.get("PosturaTactico") else ''}
         </div>
         """, unsafe_allow_html=True)
-        st.link_button("Abrir Publicación Original ↗", item["EnlaceReal"])
+        st.link_button("Abrir Publicación en Facebook ↗", item["EnlaceReal"])
 
 with tab_despacho:
     st.subheader("Consola de Despacho Operativo")
