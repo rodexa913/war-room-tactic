@@ -12,8 +12,6 @@ import time
 import requests
 import json
 import re
-import os
-import subprocess
 from bs4 import BeautifulSoup
 from googlenewsdecoder import gnewsdecoder
 import trafilatura
@@ -22,12 +20,6 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image as RLImage
-
-# --- INICIALIZACIÓN DEL NAVEGADOR FANTASMA EN STREAMLIT CLOUD ---
-@st.cache_resource
-def instalar_navegador_fantasma():
-    os.system("playwright install chromium")
-instalar_navegador_fantasma()
 
 st.set_page_config(page_title="WAR ROOM | Centro Táctico", page_icon="🛡️", layout="wide")
 
@@ -57,7 +49,6 @@ def descargar_logo(url):
 
 logo_bytes = descargar_logo(URL_LOGO)
 
-# DISEÑO VISUAL MEJORADO (Letras del menú en blanco brillante)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;600;800;900&display=swap');
@@ -65,7 +56,6 @@ st.markdown("""
     .stApp { background-color: #050811 !important; color: #FFFFFF !important; font-family: 'Inter', sans-serif !important; }
     [data-testid="stSidebar"] { background-color: #0A0F1D !important; border-right: 1px solid #1E293B !important; }
     
-    /* CORRECCIÓN DE ETIQUETAS DEL MENÚ LATERAL A BLANCO */
     .stTextInput label p, .stSelectbox label p, .stSlider label p { color: #FFFFFF !important; font-weight: 700 !important; font-size: 0.95rem !important; }
     
     .ticker-wrap { width: 100%; overflow: hidden; background-color: #090E1A; border: 1px solid #1E293B; border-radius: 6px; padding: 8px 12px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; display: flex; align-items: center; }
@@ -94,6 +84,10 @@ if "notas_web" not in st.session_state: st.session_state["notas_web"] = []
 if "notas_fb" not in st.session_state: st.session_state["notas_fb"] = []
 if "briefing_memo" not in st.session_state: st.session_state["briefing_memo"] = ""
 
+def limpiar_html(texto_html):
+    if not texto_html: return ""
+    return re.sub(r'<[^>]+>', '', texto_html).strip()
+
 def decodificar_url_google(url_google):
     if "news.google.com" not in url_google: return url_google
     try:
@@ -102,31 +96,11 @@ def decodificar_url_google(url_google):
     except: pass
     return url_google
 
-def extraer_cuerpo_playwright(url):
-    script_pw = f"""
-from playwright.sync_api import sync_playwright
-import trafilatura
-try:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
-        page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36")
-        page.goto('{url}', timeout=15000, wait_until='domcontentloaded')
-        page.wait_for_timeout(2000)
-        html = page.content()
-        texto = trafilatura.extract(html, include_comments=False, include_tables=False)
-        browser.close()
-        print(texto if texto else "")
-except: pass
-"""
-    with open("pw_fetch.py", "w") as f: f.write(script_pw)
-    try:
-        resultado = subprocess.run(["python", "pw_fetch.py"], capture_output=True, text=True, timeout=25)
-        return resultado.stdout.strip()
-    except: return ""
-
 def extraer_cuerpo_universal(url_directa):
     if not url_directa or "news.google.com" in url_directa: return ""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"}
+    
+    # Intento 1: Extracción normal rápida
     try:
         resp = requests.get(url_directa, headers=headers, timeout=6)
         if resp.status_code == 200:
@@ -142,8 +116,14 @@ def extraer_cuerpo_universal(url_directa):
                     except: continue
     except: pass
 
-    texto_pw = extraer_cuerpo_playwright(url_directa)
-    if texto_pw and len(texto_pw) > 80: return texto_pw[:2000]
+    # Intento 2: Túnel Lector Inteligente Jina AI
+    try:
+        resp_jina = requests.get(f"https://r.jina.ai/{url_directa}", timeout=8)
+        if resp_jina.status_code == 200 and len(resp_jina.text) > 100:
+            lineas = [l for l in resp_jina.text.split("\n") if len(l.strip()) > 35 and not l.startswith("http")]
+            return " ".join(lineas[:15])
+    except: pass
+    
     return ""
 
 def consultar_llm_dual(prompt_texto, gemini_key, groq_key):
@@ -188,29 +168,33 @@ def evaluar_tono_y_crisis(texto_completo):
 def generar_briefing_global(termino, lista_notas, gemini_k, groq_k):
     if not lista_notas: return "Panorama Informativo: Monitoreo estratégico procesado."
     corpus = "\n".join([f"- [{n['Tono']}] {n['Titular']} ({n['Medio']}): {n['Resumen']}" for n in lista_notas[:8]])
-    prompt = f"Objetivo: '{termino}'. Analiza estas notas:\n{corpus}\n\nRedacta un Memo de Situación en un párrafo directo de 4 líneas resumiendo el estado actual de la agenda pública. NO USES PARÉNTESIS."
+    prompt = f"Objetivo: '{termino}'. Analiza estas notas:\n{corpus}\n\nRedacta un Memo de Situación en un párrafo directo de 4 líneas resumiendo el estado actual de la agenda pública. PROHIBIDO USAR PARÉNTESIS."
     resultado = consultar_llm_dual(prompt, gemini_k, groq_k)
     return resultado.replace("(", "").replace(")", "") if resultado else "Cobertura distribuida sin incidencias críticas."
 
-def analizar_nota_con_ia(titular, texto_cuerpo, es_critica, gemini_k, groq_k):
+def analizar_nota_con_ia(titular, texto_cuerpo, snippet, es_critica, gemini_k, groq_k):
     resumen, postura = "", ""
+    
     if texto_cuerpo and len(texto_cuerpo) > 60:
-        material = f"Texto del reportaje:\n\"\"\"{texto_cuerpo[:3500]}\"\"\""
+        material = f"Reportaje extraído:\n'''{texto_cuerpo[:3000]}'''"
+    elif snippet and len(snippet) > 15:
+        material = f"Reportaje con bloqueo. Texto clave recuperado del buscador:\n'''{snippet}'''"
     else:
         material = f"HECHO COMPROBADO EN TITULAR: '{titular}'."
 
-    prompt = f"""Eres un periodista serio y riguroso. Redacta una crónica periodística limpia y real a partir de este suceso.
+    prompt = f"""Eres un periodista operativo y estratega en Veracruz.
+Analiza la siguiente información periodística real:
 
 {material}
 
 REGLAS ESTRICTAS E INQUEBRANTABLES:
-1. NO USES PARÉNTESIS en ninguna parte de tu redacción.
-2. PROHIBIDO usar lenguaje de relleno ("se da cuenta de", "cobertura informativa señala", "dependencias competentes", "en relación con"). Ve directo a los datos duros: qué pasó, dónde y quiénes.
-3. Si solo tienes el titular, redacta un "Flash Informativo" crudo y directo de 3 líneas basado únicamente en lo que dice el título, sin inventar nada y explicando qué significa ese suceso para Veracruz.
-4. Si es una nota de crisis o sangre, asigna una directriz de vocería. Si no, pon N/A.
+1. REDACTA EXACTAMENTE 4 LÍNEAS DE TEXTO fluidas explicando qué sucedió, dónde y qué impacto tiene en la región.
+2. NO USES PARÉNTESIS en ninguna parte de tu redacción. Bajo ninguna circunstancia.
+3. VE DIRECTO A LOS DATOS DUROS. Prohibido usar frases de relleno, burocráticas o repetitivas.
+4. Si es una nota de crisis o seguridad, asigna una directriz de vocería breve. Si no, pon N/A.
 
 Formato:
-RESUMEN: [Crónica periodística limpia, CERO frases huecas, CERO paréntesis]
+RESUMEN: [Tus 4 líneas crudas y reales de análisis periodístico sin usar paréntesis]
 VOCERIA: [Directriz o N/A]"""
 
     resp_llm = consultar_llm_dual(prompt, gemini_k, groq_k)
@@ -222,9 +206,9 @@ VOCERIA: [Directriz o N/A]"""
         else:
             resumen = resp_llm.strip()
 
-    basura = ["se da cuenta", "cobertura informativa", "en relación con", "dependencias competentes"]
-    if not resumen or len(resumen) < 30 or any(b in resumen.lower() for b in basura):
-        resumen = f"Flash Informativo: Los reportes preliminares operativos confirman el incidente '{titular}'. El suceso se integra a la bitácora regional a la espera de mayores datos de las fuentes originales."
+    # Si la IA falla, usamos el snippet como plan de emergencia directo
+    if not resumen or len(resumen) < 30:
+        resumen = f"Análisis táctico en proceso. Los reportes confirman el incidente central: {titular}. {snippet[:150]}"
 
     return resumen.replace("(", "").replace(")", ""), (postura.replace("(", "").replace(")", "") if postura and postura.upper() != "N/A" else "")
 
@@ -354,15 +338,17 @@ if btn_ejecutar_web:
         for nota in feed.entries[:limite_web]:
             tit = nota.title
             tono, col, es_crisis, severidad = evaluar_tono_y_crisis(tit)
-            lista_previa.append({"Titular": tit, "Medio": nota.source.title if hasattr(nota, "source") else "Web", "Fecha": nota.published if hasattr(nota, "published") else "Reciente", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit)})
+            resumen_raw = nota.summary if hasattr(nota, 'summary') else (nota.description if hasattr(nota, 'description') else "")
+            snippet = limpiar_html(resumen_raw)
+            lista_previa.append({"Titular": tit, "Medio": nota.source.title if hasattr(nota, "source") else "Web", "Fecha": nota.published if hasattr(nota, "published") else "Reciente", "Enlace": nota.link, "Tono": tono, "Color": col, "EsCrisis": es_crisis, "Severidad": severidad, "Sector": clasificar_sector(tit), "Snippet": snippet})
 
     if lista_previa:
         progreso = st.progress(0)
         for idx, item in enumerate(lista_previa, 1):
-            progreso.progress(idx / len(lista_previa), text=f"Extrayendo: {item['Medio']}...")
+            progreso.progress(idx / len(lista_previa), text=f"Extrayendo texto limpio: {item['Medio']}...")
             url_real = decodificar_url_google(item["Enlace"])
             cuerpo = extraer_cuerpo_universal(url_real)
-            resumen, postura = analizar_nota_con_ia(item["Titular"], cuerpo, item["EsCrisis"], gemini_key_in, groq_key_in)
+            resumen, postura = analizar_nota_con_ia(item["Titular"], cuerpo, item.get("Snippet", ""), item["EsCrisis"], gemini_key_in, groq_key_in)
             item["No"] = idx
             item["EnlaceReal"] = url_real
             item["Resumen"] = resumen
@@ -370,7 +356,7 @@ if btn_ejecutar_web:
         progreso.empty()
         st.session_state["notas_web"] = lista_previa
         st.session_state["briefing_memo"] = generar_briefing_global(objetivo_res, lista_previa, gemini_key_in, groq_key_in)
-        st.success("¡Análisis completado exitosamente!")
+        st.success("¡Análisis completado exitosamente y libre de cuellos de botella!")
         st.rerun()
     else:
         st.warning("No se hallaron notas con esos filtros.")
@@ -381,7 +367,7 @@ if btn_ejecutar_fb:
         if posts:
             for i, p in enumerate(posts, 1):
                 p["No"] = i
-                p["Resumen"], p["PosturaTactico"] = analizar_nota_con_ia(p["Titular"], p.get("TextoCuerpo", ""), p["EsCrisis"], gemini_key_in, groq_key_in)
+                p["Resumen"], p["PosturaTactico"] = analizar_nota_con_ia(p["Titular"], p.get("TextoCuerpo", ""), "", p["EsCrisis"], gemini_key_in, groq_key_in)
             st.session_state["notas_fb"] = posts
             st.rerun()
 
