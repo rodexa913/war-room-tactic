@@ -289,12 +289,14 @@ if btn_ejecutar_web:
         st.warning("No se hallaron notas con esos filtros.")
 
 if btn_ejecutar_fb:
-    # Búsqueda exclusiva enfocada a publicaciones directas de Facebook
-    termino_fb = f'"{f_nombre.strip()}"' if f_nombre.strip() else f'"{f_lugar}"'
-    q_social = f'site:facebook.com {termino_fb} Veracruz when:2d'
+    # Integración estricta del Partido Político en la búsqueda de Facebook
+    Filtro_partido_str = f'"{f_partido}"' if f_partido != "Todos" else ""
+    objetivo_busqueda = f'"{f_nombre.strip()}"' if f_nombre.strip() else f'"{f_lugar}"'
+    
+    q_social = f'site:facebook.com {objetivo_busqueda} {Filtro_partido_str} Veracruz when:2d'.strip()
     
     lista_social = []
-    with st.spinner("Rastreando publicaciones en perfiles y páginas de Facebook..."):
+    with st.spinner("Rastreando publicaciones en perfiles y páginas de Facebook con filtros estrictos..."):
         feed_soc = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q_social)}&hl=es-419&gl=MX&ceid=MX:es-419")
         for nota in feed_soc.entries[:6]:
             tit = nota.title
@@ -316,10 +318,10 @@ if btn_ejecutar_fb:
             time.sleep(1.0)
         progreso_soc.empty()
         st.session_state["notas_fb"] = lista_soc_procesada
-        st.success("¡Rastreo de Facebook completado!")
+        st.success("¡Rastreo de Facebook con partido completado!")
         st.rerun()
     else:
-        st.warning("No se hallaron publicaciones públicas recientes en Facebook con ese objetivo en las últimas 48 horas.")
+        st.warning("No se hallaron publicaciones públicas recientes en Facebook con esos filtros estrictos en las últimas 48 horas.")
 
 tab_mando, tab_prensa, tab_fb, tab_despacho = st.tabs(["🎯 Sala de Mando", "🌐 Prensa Web", "📡 Perfiles Facebook", "📑 Despacho de Informes"])
 
